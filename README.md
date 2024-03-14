@@ -1,291 +1,163 @@
-# Project template for rp2040-hal
+# Embassy
 
-This template is intended as a starting point for developing your own firmware based on the rp2040-hal.
+Embassy is the next-generation framework for embedded applications. Write safe, correct and energy-efficient embedded code faster, using the Rust programming language, its async facilities, and the Embassy libraries.
 
-It includes all of the `knurling-rs` tooling as showcased in https://github.com/knurling-rs/app-template (`defmt`, `defmt-rtt`, `panic-probe`, `flip-link`) to make development as easy as possible.
+## <a href="https://embassy.dev/book/dev/index.html">Documentation</a> - <a href="https://docs.embassy.dev/">API reference</a> - <a href="https://embassy.dev/">Website</a> - <a href="https://matrix.to/#/#embassy-rs:matrix.org">Chat</a>
+## Rust + async ❤️ embedded
 
-`probe-rs` is configured as the default runner, so you can start your program as easy as
-```sh
-cargo run --release
+The Rust programming language is blazingly fast and memory-efficient, with no runtime, garbage collector or OS. It catches a wide variety of bugs at compile time, thanks to its full memory- and thread-safety, and expressive type system. 
+
+Rust's <a href="https://rust-lang.github.io/async-book/">async/await</a> allows for unprecedently easy and efficient multitasking in embedded systems. Tasks get transformed at compile time into state machines that get run cooperatively. It requires no dynamic memory allocation, and runs on a single stack,  so no per-task stack size tuning is required. It obsoletes the need for a traditional RTOS with kernel context switching, and is <a href="https://tweedegolf.nl/en/blog/65/async-rust-vs-rtos-showdown">faster and smaller than one!</a>
+
+## Batteries included
+
+- **Hardware Abstraction Layers** - HALs implement safe, idiomatic Rust APIs to use the hardware capabilities, so raw register manipulation is not needed. The Embassy project maintains HALs for select hardware, but you can still use HALs from other projects with Embassy.
+  - <a href="https://docs.embassy.dev/embassy-stm32/">embassy-stm32</a>, for all STM32 microcontroller families.
+  - <a href="https://docs.embassy.dev/embassy-nrf/">embassy-nrf</a>, for the Nordic Semiconductor nRF52, nRF53, nRF91 series.
+  - <a href="https://docs.embassy.dev/embassy-rp/">embassy-rp</a>, for the Raspberry Pi RP2040 microcontroller.
+  - <a href="https://github.com/esp-rs">esp-rs</a>, for the Espressif Systems ESP32 series of chips.
+    - Embassy HAL support for Espressif chips is being developed in the [esp-rs/esp-hal](https://github.com/esp-rs/esp-hal) repository.
+    - Async WiFi, Bluetooth and ESP-NOW is being developed in the [esp-rs/esp-wifi](https://github.com/esp-rs/esp-wifi) repository.
+
+- **Time that Just Works** - 
+No more messing with hardware timers. <a href="https://docs.embassy.dev/embassy-time">embassy_time</a> provides Instant, Duration and Timer types that are globally available and never overflow.
+
+- **Real-time ready** - 
+Tasks on the same async executor run cooperatively, but you can create multiple executors with different priorities, so that higher priority tasks preempt lower priority ones. See the <a href="https://github.com/embassy-rs/embassy/blob/master/examples/nrf52840/src/bin/multiprio.rs">example</a>.
+
+- **Low-power ready** - 
+Easily build devices with years of battery life. The async executor automatically puts the core to sleep when there's no work to do. Tasks are woken by interrupts, there is no busy-loop polling while waiting.
+ 
+- **Networking** - 
+The <a href="https://docs.embassy.dev/embassy-net/">embassy-net</a> network stack implements extensive networking functionality, including Ethernet, IP, TCP, UDP, ICMP and DHCP. Async drastically simplifies managing timeouts and serving multiple connections concurrently.
+
+- **Bluetooth** - 
+The <a href="https://github.com/embassy-rs/nrf-softdevice">nrf-softdevice</a> crate provides Bluetooth Low Energy 4.x and 5.x support for nRF52 microcontrollers.
+The <a href="https://github.com/embassy-rs/embassy/tree/main/embassy-stm32-wpan">embassy-stm32-wpan</a> crate provides Bluetooth Low Energy 5.x support for stm32wb microcontrollers.
+
+- **LoRa** - The <a href="https://github.com/lora-rs/lora-rs">lora-rs</a> project provides an async LoRa and LoRaWAN stack that works well on Embassy.
+
+- **USB** - 
+<a href="https://docs.embassy.dev/embassy-usb/">embassy-usb</a> implements a device-side USB stack. Implementations for common classes such as USB serial (CDC ACM) and USB HID are available, and a rich builder API allows building your own.
+
+- **Bootloader and DFU** - 
+<a href="https://github.com/embassy-rs/embassy/tree/master/embassy-boot">embassy-boot</a> is a lightweight bootloader supporting firmware application upgrades in a power-fail-safe way, with trial boots and rollbacks.
+
+
+## Sneak peek
+
+```rust,ignore
+use defmt::info;
+use embassy_executor::Spawner;
+use embassy_time::{Duration, Timer};
+use embassy_nrf::gpio::{AnyPin, Input, Level, Output, OutputDrive, Pin, Pull};
+use embassy_nrf::Peripherals;
+
+// Declare async tasks
+#[embassy_executor::task]
+async fn blink(pin: AnyPin) {
+    let mut led = Output::new(pin, Level::Low, OutputDrive::Standard);
+
+    loop {
+        // Timekeeping is globally available, no need to mess with hardware timers.
+        led.set_high();
+        Timer::after_millis(150).await;
+        led.set_low();
+        Timer::after_millis(150).await;
+    }
+}
+
+// Main is itself an async task as well.
+#[embassy_executor::main]
+async fn main(spawner: Spawner) {
+    let p = embassy_nrf::init(Default::default());
+
+    // Spawned tasks run in the background, concurrently.
+    spawner.spawn(blink(p.P0_13.degrade())).unwrap();
+
+    let mut button = Input::new(p.P0_11, Pull::Up);
+    loop {
+        // Asynchronously wait for GPIO events, allowing other tasks
+        // to run, or the core to sleep.
+        button.wait_for_low().await;
+        info!("Button pressed!");
+        button.wait_for_high().await;
+        info!("Button released!");
+    }
+}
 ```
 
-If you aren't using a debugger (or want to use other debugging configurations), check out [alternative runners](#alternative-runners) for other options
+## Examples
 
-<!-- TABLE OF CONTENTS -->
-<details open="open">
-  
-  <summary><h2 style="display: inline-block">Table of Contents</h2></summary>
-  <ol>
-    <li><a href="#markdown-header-requirements">Requirements</a></li>
-    <li><a href="#installation-of-development-dependencies">Installation of development dependencies</a></li>
-    <li><a href="#running">Running</a></li>
-    <li><a href="#alternative-runners">Alternative runners</a></li>
-    <li><a href="#notes-on-using-rp2040_boot2">Notes on using rp2040_boot2</a></li>
-    <li><a href="#feature-flags">Feature flags</a></li>
-    <li><a href="#roadmap">Roadmap</a></li>
-    <li><a href="#contributing">Contributing</a></li>
-    <li><a href="#code-of-conduct">Code of conduct</a></li>
-    <li><a href="#license">License</a></li>
-    <li><a href="#contact">Contact</a></li>
-  </ol>
-</details>
+Examples are found in the `examples/` folder seperated by the chip manufacturer they are designed to run on. For example:
 
-<!-- Requirements -->
-<details open="open">
-  <summary><h2 style="display: inline-block" id="requirements">Requirements</h2></summary>
-  
-- The standard Rust tooling (cargo, rustup) which you can install from https://rustup.rs/
+*   `examples/nrf52840` run on the `nrf52840-dk` board (PCA10056) but should be easily adaptable to other nRF52 chips and boards.
+*   `examples/nrf5340` run on the `nrf5340-dk` board (PCA10095).
+*   `examples/stm32xx` for the various STM32 families.
+*   `examples/rp` are for the RP2040 chip.
+*   `examples/std` are designed to run locally on your PC.
 
-- Toolchain support for the cortex-m0+ processors in the rp2040 (thumbv6m-none-eabi)
+### Running examples
 
-- flip-link - this allows you to detect stack-overflows on the first core, which is the only supported target for now.
+- Install `probe-rs`.
 
-- (by default) A [`probe-rs` installation](https://probe.rs/docs/getting-started/installation/)
-
-- A [`probe-rs` compatible](https://probe.rs/docs/getting-started/probe-setup/) probe
-
-  You can use a second
-  [Pico as a CMSIS-DAP debug probe](debug_probes.md#raspberry-pi-pico). Details
-  on other supported debug probes can be found in
-  [debug_probes.md](debug_probes.md)
-
-</details>
-
-<!-- Installation of development dependencies -->
-<details open="open">
-  <summary><h2 style="display: inline-block" id="installation-of-development-dependencies">Installation of development dependencies</h2></summary>
-
-```sh
-rustup target install thumbv6m-none-eabi
-cargo install flip-link
-# Installs the probe-rs tools, including probe-rs run, our recommended default runner
-cargo install probe-rs --features=cli --locked
-# If you want to use elf2uf2-rs instead, do...
-cargo install elf2uf2-rs --locked
-```
-If you get the error ``binary `cargo-embed` already exists`` during installation of probe-rs, run `cargo uninstall cargo-embed` to uninstall your older version of cargo-embed before trying again.
-
-</details>
-
-
-<!-- Running -->
-<details open="open">
-  <summary><h2 style="display: inline-block" id="running">Running</h2></summary>
-  
-For a debug build
-```sh
-cargo run
-```
-For a release build
-```sh
-cargo run --release
+```bash
+cargo install probe-rs --features cli
 ```
 
-If you do not specify a DEFMT_LOG level, it will be set to `debug`.
-That means `println!("")`, `info!("")` and `debug!("")` statements will be printed.
-If you wish to override this, you can change it in `.cargo/config.toml` 
-```toml
-[env]
-DEFMT_LOG = "off"
-```
-You can also set this inline (on Linux/MacOS)  
-```sh
-DEFMT_LOG=trace cargo run
+- Change directory to the sample's base directory. For example:
+
+```bash
+cd examples/nrf52840
 ```
 
-or set the _environment variable_ so that it applies to every `cargo run` call that follows:
-#### Linux/MacOS/unix
-```sh
-export DEFMT_LOG=trace
+- Ensure `Cargo.toml` sets the right feature for the name of the chip you are programming.
+  If this name is incorrect, the example may fail to run or immediately crash
+  after being programmed.
+
+- Ensure `.cargo/config.toml` contains the name of the chip you are programming.
+
+- Run the example
+
+For example:
+
+```bash
+cargo run --release --bin blinky
 ```
 
-Setting the DEFMT_LOG level for the current session  
-for bash
-```sh
-export DEFMT_LOG=trace
-```
+For more help getting started, see [Getting Started][1] and [Running the Examples][2].
 
-#### Windows
-Windows users can only override DEFMT_LOG through `config.toml`
-or by setting the environment variable as a separate step before calling `cargo run`
-- cmd
-```cmd
-set DEFMT_LOG=trace
-```
-- powershell
-```ps1
-$Env:DEFMT_LOG = trace
-```
+## Developing Embassy with Rust Analyzer based editors
 
-```cmd
-cargo run
-```
+The [Rust Analyzer](https://rust-analyzer.github.io/) is used by [Visual Studio Code](https://code.visualstudio.com/)
+and others. Given the multiple targets that Embassy serves, there is no Cargo workspace file. Instead, the Rust Analyzer 
+must be told of the target project to work with. In the case of Visual Studio Code, 
+please refer to the `.vscode/settings.json` file's `rust-analyzer.linkedProjects`setting.
 
-</details>
-<!-- ALTERNATIVE RUNNERS -->
-<details open="open">
-  <summary><h2 style="display: inline-block" id="alternative-runners">Alternative runners</h2></summary>
+## Minimum supported Rust version (MSRV)
 
-If you don't have a debug probe or if you want to do interactive debugging you can set up an alternative runner for cargo.  
+Embassy is guaranteed to compile on stable Rust 1.75 and up. It *might*
+compile with older versions but that may change in any new patch release.
 
-Some of the options for your `runner` are listed below:
+## Why the name?
 
-* **`cargo embed`**
-  This is basically a more configurable version of `probe-rs run`, our default runner.
-  See [the `cargo-embed` tool docs page](https://probe.rs/docs/tools/cargo-embed/) for
-  more information.
-  
-  *Step 1* - Install `cargo-embed`. This is part of the [`probe-rs`](https://crates.io/crates/probe-rs) tools:
-
-  ```console
-  $ cargo install probe-rs --features=cli --locked
-  ```
-
-  *Step 2* - Update settings in [Embed.toml](./Embed.toml)  
-  - The defaults are to flash, reset, and start a defmt logging session
-  You can find all the settings and their meanings [in the probe-rs repo](https://github.com/probe-rs/probe-rs/blob/c0610e98008cbb34d0dc056fcddff0f2d4f50ad5/probe-rs/src/bin/probe-rs/cmd/cargo_embed/config/default.toml)
-
-  *Step 3* - Use the command `cargo embed`, which will compile the code, flash the device
-  and start running the configuration specified in Embed.toml
-
-  ```console
-  $ cargo embed --release
-  ```
-
-* **probe-rs-debugger**
-  *Step 1* - Install Visual Studio Code from https://code.visualstudio.com/
-
-  *Step 2* - Install `probe-rs`
-  ```console
-  $ cargo install probe-rs --features=cli --locked
-  ```
-
-  *Step 3* - Open this project in VSCode
-
-  *Step 4* - Install `debugger for probe-rs` via the VSCode extensions menu (View > Extensions)
-
-  *Step 5* - Launch a debug session by choosing `Run`>`Start Debugging` (or press F5)
-
-* **Loading a UF2 over USB**  
-  *Step 1* - Install [`elf2uf2-rs`](https://github.com/JoNil/elf2uf2-rs):
-
-  ```console
-  $ cargo install elf2uf2-rs --locked
-  ```
-
-  *Step 2* - Modify `.cargo/config` to change the default runner
-
-  ```toml
-  [target.`cfg(all(target-arch = "arm", target_os = "none"))`]
-  runner = "elf2uf2-rs -d"
-  ```
-
-  The all-Arm wildcard `'cfg(all(target_arch = "arm", target_os = "none"))'` is used
-  by default in the template files, but may also be replaced by
-  `thumbv6m-none-eabi`.
-
-  *Step 3* - Boot your RP2040 into "USB Bootloader mode", typically by rebooting
-  whilst holding some kind of "Boot Select" button. On Linux, you will also need
-  to 'mount' the device, like you would a USB Thumb Drive.
-
-  *Step 4* - Use `cargo run`, which will compile the code and start the
-  specified 'runner'. As the 'runner' is the `elf2uf2-rs` tool, it will build a UF2
-  file and copy it to your RP2040.
-
-  ```console
-  $ cargo run --release
-  ```
-
-* **Loading with picotool**  
-  As ELF files produced by compiling Rust code are completely compatible with ELF
-  files produced by compiling C or C++ code, you can also use the Raspberry Pi
-  tool [picotool](https://github.com/raspberrypi/picotool). The only thing to be
-  aware of is that picotool expects your ELF files to have a `.elf` extension, and
-  by default Rust does not give the ELF files any extension. You can fix this by
-  simply renaming the file.
-
-  This means you can't easily use it as a cargo runner - yet.
-
-  Also of note is that the special
-  [pico-sdk](https://github.com/raspberrypi/pico-sdk) macros which hide
-  information in the ELF file in a way that `picotool info` can read it out, are
-  not supported in Rust. An alternative is TBC.
-
-</details>
-<!-- Notes on using rp2040_hal and rp2040_boot2 -->
-<details open="open">
-  <summary><h2 style="display: inline-block" id="notes-on-using-rp2040_boot2">Notes on using rp2040_boot2</h2></summary>
-
-  The second-stage boot loader must be written to the .boot2 section. That
-  is usually handled by the board support package (e.g.`rp-pico`). If you don't use
-  one, you should initialize the boot loader manually. This can be done by adding the
-  following to the beginning of main.rs:
-  ```rust
-  use rp2040_boot2;
-  #[link_section = ".boot2"]
-  #[used]
-  pub static BOOT_LOADER: [u8; 256] = rp2040_boot2::BOOT_LOADER_W25Q080;
-  ```
-
-</details>
-
-<!-- Feature flags -->
-<details open="open">
-  <summary><h2 style="display: inline-block" id="feature-flags">Feature flags</h2></summary>
-
-  There are several [feature flags in rp2040-hal](https://docs.rs/rp2040-hal/latest/rp2040_hal/#crate-features).
-  If you want to enable some of them, uncomment the `rp2040-hal` dependency in `Cargo.toml` and add the
-  desired feature flags there. For example, to enable ROM functions for f64 math using the feature `rom-v2-intrinsics`:
-  ```
-  rp2040-hal = { version="0.9", features=["rt", "critical-section-impl", "rom-v2-intrinsics"] }
-  ```
-</details>
-
-<!-- ROADMAP -->
-
-## Roadmap
-
-NOTE These packages are under active development. As such, it is likely to
-remain volatile until a 1.0.0 release.
-
-See the [open issues](https://github.com/rp-rs/rp2040-project-template/issues) for a list of
-proposed features (and known issues).
-
-## Contributing
-
-Contributions are what make the open source community such an amazing place to be learn, inspire, and create. Any contributions you make are **greatly appreciated**.
-
-The steps are:
-
-1. Fork the Project by clicking the 'Fork' button at the top of the page.
-2. Create your Feature Branch (`git checkout -b feature/AmazingFeature`)
-3. Make some changes to the code or documentation.
-4. Commit your Changes (`git commit -m 'Add some AmazingFeature'`)
-5. Push to the Feature Branch (`git push origin feature/AmazingFeature`)
-6. Create a [New Pull Request](https://github.com/rp-rs/rp-hal/pulls)
-7. An admin will review the Pull Request and discuss any changes that may be required.
-8. Once everyone is happy, the Pull Request can be merged by an admin, and your work is part of our project!
-
-## Code of Conduct
-
-Contribution to this crate is organized under the terms of the [Rust Code of
-Conduct][CoC], and the maintainer of this crate, the [rp-rs team], promises
-to intervene to uphold that code of conduct.
-
-[CoC]: CODE_OF_CONDUCT.md
-[rp-rs team]: https://github.com/orgs/rp-rs/teams/rp-rs
+EMBedded ASYnc! :)
 
 ## License
 
-The contents of this repository are dual-licensed under the _MIT OR Apache
-2.0_ License. That means you can chose either the MIT licence or the
-Apache-2.0 licence when you re-use this code. See `MIT` or `APACHE2.0` for more
-information on each specific licence.
+Embassy is licensed under either of
 
-Any submissions to this project (e.g. as Pull Requests) must be made available
-under these terms.
+- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE) or
+  <http://www.apache.org/licenses/LICENSE-2.0>)
+- MIT license ([LICENSE-MIT](LICENSE-MIT) or <http://opensource.org/licenses/MIT>)
 
-## Contact
+at your option.
 
-Raise an issue: [https://github.com/rp-rs/rp2040-project-template/issues](https://github.com/rp-rs/rp2040-project-template/issues)
-Chat to us on Matrix: [#rp-rs:matrix.org](https://matrix.to/#/#rp-rs:matrix.org)
+## Contribution
+
+Unless you explicitly state otherwise, any contribution intentionally submitted
+for inclusion in the work by you, as defined in the Apache-2.0 license, shall be
+dual licensed as above, without any additional terms or conditions.
+
+[1]: https://github.com/embassy-rs/embassy/wiki/Getting-Started
+[2]: https://github.com/embassy-rs/embassy/wiki/Running-the-Examples
